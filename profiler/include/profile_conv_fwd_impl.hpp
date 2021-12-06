@@ -6,40 +6,29 @@
 #include "host_conv.hpp"
 #include "tensor_layout.hpp"
 #include "device_tensor.hpp"
-#include "device_conv.hpp"
-#include "device_conv_instance.hpp"
+#include "device_conv_fwd.hpp"
 #include "element_wise_operation.hpp"
 
 namespace ck {
 namespace tensor_operation {
 namespace device {
-namespace device_conv_instance {
+namespace device_conv2d_fwd_instance {
 
 using DeviceConvFwdNoOpPtr = DeviceConvFwdPtr<ck::tensor_operation::element_wise::PassThrough,
                                               ck::tensor_operation::element_wise::PassThrough,
                                               ck::tensor_operation::element_wise::PassThrough>;
 
-template <>
-void add_device_conv_fwd_instance<2,
-                                  float,
-                                  float,
-                                  float,
-                                  ck::tensor_layout::convolution::NHWC,
-                                  ck::tensor_layout::convolution::KYXC,
-                                  ck::tensor_layout::convolution::NHWK>(
+void add_device_conv2d_fwd_xdl_nhwc_kyxc_nhwk_fp32_instances(std::vector<DeviceConvFwdNoOpPtr>&);
+
+void add_device_conv2d_fwd_xdl_nhwc_kyxc_nhwk_fp16_instances(std::vector<DeviceConvFwdNoOpPtr>&);
+
+void add_device_conv2d_fwd_xdl_nhwc_kyxc_nhwk_1x1_p0_fp16_instances(
     std::vector<DeviceConvFwdNoOpPtr>&);
 
-template <>
-void add_device_conv_fwd_instance<2,
-                                  ck::half_t,
-                                  ck::half_t,
-                                  ck::half_t,
-                                  ck::tensor_layout::convolution::NHWC,
-                                  ck::tensor_layout::convolution::KYXC,
-                                  ck::tensor_layout::convolution::NHWK>(
+void add_device_conv2d_fwd_xdl_nhwc_kyxc_nhwk_1x1_s1_p0_fp16_instances(
     std::vector<DeviceConvFwdNoOpPtr>&);
 
-} // namespace device_conv_instance
+} // namespace device_conv2d_fwd_instance
 } // namespace device
 } // namespace tensor_operation
 } // namespace ck
@@ -54,20 +43,20 @@ template <int NDimSpatial,
           typename InLayout,
           typename WeiLayout,
           typename OutLayout>
-void profile_conv(int do_verification,
-                  int init_method,
-                  bool do_log,
-                  int nrepeat,
-                  ck::index_t N,
-                  ck::index_t K,
-                  ck::index_t C,
-                  std::vector<ck::index_t> input_spatial_lengths,
-                  std::vector<ck::index_t> filter_spatial_lengths,
-                  std::vector<ck::index_t> output_spatial_lengths,
-                  std::vector<ck::index_t> conv_filter_strides,
-                  std::vector<ck::index_t> conv_filter_dilations,
-                  std::vector<ck::index_t> input_left_pads,
-                  std::vector<ck::index_t> input_right_pads)
+void profile_conv_fwd_impl(int do_verification,
+                           int init_method,
+                           bool do_log,
+                           int nrepeat,
+                           ck::index_t N,
+                           ck::index_t K,
+                           ck::index_t C,
+                           std::vector<ck::index_t> input_spatial_lengths,
+                           std::vector<ck::index_t> filter_spatial_lengths,
+                           std::vector<ck::index_t> output_spatial_lengths,
+                           std::vector<ck::index_t> conv_filter_strides,
+                           std::vector<ck::index_t> conv_filter_dilations,
+                           std::vector<ck::index_t> input_left_pads,
+                           std::vector<ck::index_t> input_right_pads)
 {
     const ck::index_t Y = filter_spatial_lengths[0];
     const ck::index_t X = filter_spatial_lengths[1];
@@ -146,20 +135,33 @@ void profile_conv(int do_verification,
     // add device Conv instances
     std::vector<DeviceConvFwdNoOpPtr> conv_ptrs;
 
-    ck::tensor_operation::device::device_conv_instance::add_device_conv_fwd_instance<2,
-                                                                                     InDataType,
-                                                                                     WeiDataType,
-                                                                                     OutDataType,
-                                                                                     InLayout,
-                                                                                     WeiLayout,
-                                                                                     OutLayout>(
-        conv_ptrs);
+    if constexpr(ck::is_same_v<ck::remove_cv_t<InDataType>, float> &&
+                 ck::is_same_v<ck::remove_cv_t<WeiDataType>, float> &&
+                 ck::is_same_v<ck::remove_cv_t<OutDataType>, float>)
+    {
+        ck::tensor_operation::device::device_conv2d_fwd_instance::
+            add_device_conv2d_fwd_xdl_nhwc_kyxc_nhwk_fp32_instances(conv_ptrs);
+    }
+    else if constexpr(ck::is_same_v<ck::remove_cv_t<InDataType>, ck::half_t> &&
+                      ck::is_same_v<ck::remove_cv_t<WeiDataType>, ck::half_t> &&
+                      ck::is_same_v<ck::remove_cv_t<OutDataType>, ck::half_t>)
+    {
+        ck::tensor_operation::device::device_conv2d_fwd_instance::
+            add_device_conv2d_fwd_xdl_nhwc_kyxc_nhwk_fp16_instances(conv_ptrs);
+
+        ck::tensor_operation::device::device_conv2d_fwd_instance::
+            add_device_conv2d_fwd_xdl_nhwc_kyxc_nhwk_1x1_p0_fp16_instances(conv_ptrs);
+
+        ck::tensor_operation::device::device_conv2d_fwd_instance::
+            add_device_conv2d_fwd_xdl_nhwc_kyxc_nhwk_1x1_s1_p0_fp16_instances(conv_ptrs);
+    }
 
     if(conv_ptrs.size() <= 0)
     {
         throw std::runtime_error("wrong! no device Conv instance found");
     }
 
+    std::string best_conv_name;
     float best_ave_time   = 0;
     float best_tflops     = 0;
     float best_gb_per_sec = 0;
@@ -189,6 +191,8 @@ void profile_conv(int do_verification,
 
         if(conv_ptr->IsSupportedArgument(argument_ptr.get()))
         {
+            std::string conv_name = conv_ptr->GetTypeString();
+
             float ave_time = invoker_ptr->Run(argument_ptr.get(), nrepeat);
 
             std::size_t flop = std::size_t(2) * N * K * Ho * Wo * C * Y * X;
@@ -202,10 +206,11 @@ void profile_conv(int do_verification,
             float gb_per_sec = num_btype / 1.E6 / ave_time;
 
             std::cout << "Perf: " << ave_time << " ms, " << tflops << " TFlops, " << gb_per_sec
-                      << " GB/s" << std::endl;
+                      << " GB/s, " << conv_name << std::endl;
 
             if(tflops > best_tflops)
             {
+                best_conv_name  = conv_name;
                 best_tflops     = tflops;
                 best_ave_time   = ave_time;
                 best_gb_per_sec = gb_per_sec;
@@ -235,7 +240,7 @@ void profile_conv(int do_verification,
     }
 
     std::cout << "Best Perf: " << best_ave_time << " ms, " << best_tflops << " TFlops, "
-              << best_gb_per_sec << " GB/s" << std::endl;
+              << best_gb_per_sec << " GB/s, " << best_conv_name << std::endl;
 }
 
 } // namespace profiler

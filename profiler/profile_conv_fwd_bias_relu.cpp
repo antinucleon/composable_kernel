@@ -4,7 +4,7 @@
 #include <cstdlib>
 #include <stdlib.h>
 #include <half.hpp>
-#include "profile_conv.hpp"
+#include "profile_conv_fwd_bias_relu_impl.hpp"
 
 enum ConvDataType
 {
@@ -30,11 +30,11 @@ enum ConvOutputLayout
     NHWK, // 1
 };
 
-int conv_profiler(int argc, char* argv[])
+int profile_conv_fwd_bias_relu(int argc, char* argv[])
 {
     if(argc != 25)
     {
-        printf("arg1: tensor operation (conv: Convolution)\n");
+        printf("arg1: tensor operation (conv_fwd_bias_relu: ForwardConvolution+Bias+ReLu)\n");
         printf("arg2: data type (0: fp32; 1: fp16)\n");
         printf("arg3: input tensor layout (0: NCHW; 1: NHWC)\n");
         printf("arg4: weight tensor layout (0: KCYX; 1: KYXC)\n");
@@ -80,41 +80,16 @@ int conv_profiler(int argc, char* argv[])
     const ck::index_t Ho = (Hi + in_left_pad_h + in_right_pad_h - YEff) / conv_stride_h + 1;
     const ck::index_t Wo = (Wi + in_left_pad_w + in_right_pad_w - XEff) / conv_stride_w + 1;
 
-    if(data_type == ConvDataType::F32_F32_F32 && in_layout == ConvInputLayout::NHWC &&
+    if(data_type == ConvDataType::F16_F16_F16 && in_layout == ConvInputLayout::NHWC &&
        wei_layout == ConvWeightLayout::KYXC && out_layout == ConvOutputLayout::NHWK)
     {
-        ck::profiler::profile_conv<2,
-                                   float,
-                                   float,
-                                   float,
-                                   ck::tensor_layout::convolution::NHWC,
-                                   ck::tensor_layout::convolution::KYXC,
-                                   ck::tensor_layout::convolution::NHWK>(
-            do_verification,
-            init_method,
-            do_log,
-            nrepeat,
-            N,
-            K,
-            C,
-            std::vector<ck::index_t>{Hi, Wi},
-            std::vector<ck::index_t>{Y, X},
-            std::vector<ck::index_t>{Ho, Wo},
-            std::vector<ck::index_t>{conv_stride_h, conv_stride_w},
-            std::vector<ck::index_t>{conv_dilation_h, conv_dilation_w},
-            std::vector<ck::index_t>{in_left_pad_h, in_left_pad_w},
-            std::vector<ck::index_t>{in_right_pad_h, in_right_pad_w});
-    }
-    else if(data_type == ConvDataType::F16_F16_F16 && in_layout == ConvInputLayout::NHWC &&
-            wei_layout == ConvWeightLayout::KYXC && out_layout == ConvOutputLayout::NHWK)
-    {
-        ck::profiler::profile_conv<2,
-                                   ck::half_t,
-                                   ck::half_t,
-                                   ck::half_t,
-                                   ck::tensor_layout::convolution::NHWC,
-                                   ck::tensor_layout::convolution::KYXC,
-                                   ck::tensor_layout::convolution::NHWK>(
+        ck::profiler::profile_conv_fwd_bias_relu_impl<2,
+                                                      ck::half_t,
+                                                      ck::half_t,
+                                                      ck::half_t,
+                                                      ck::tensor_layout::convolution::NHWC,
+                                                      ck::tensor_layout::convolution::KYXC,
+                                                      ck::tensor_layout::convolution::NHWK>(
             do_verification,
             init_method,
             do_log,
@@ -132,7 +107,7 @@ int conv_profiler(int argc, char* argv[])
     }
     else
     {
-        throw std::runtime_error("wrong! this Conv data_type & layout is not implemented");
+        throw std::runtime_error("wrong! data_type & layout for this operator is not implemented");
     }
 
     return 1;
