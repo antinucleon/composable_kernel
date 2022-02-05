@@ -48,7 +48,7 @@ struct AddRelu
     {
 
         T a = x0 + x1;
-        y   = a > 0 ? a : 0;
+        y   = a > 0.0f ? a : 0.0f;
 
     }
 };
@@ -60,7 +60,7 @@ struct AddReluAdd
     {
 
         T a = x0 + x1;
-        T b = a > 0 ? a : 0;
+        T b = a > 0.0f ? a : 0.0f;
         y   = b + x2;
 
     }
